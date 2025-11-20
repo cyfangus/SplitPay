@@ -601,5 +601,5 @@ else:
             
         st.divider()
         st.subheader("Event Members")
-        for m in current_members:
+        for m in current_event['members']:
             st.text(f"- {m}")
