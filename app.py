@@ -218,11 +218,11 @@ elif not st.session_state.current_event:
         st.markdown("### Create New Event")
         with st.form("new_event"):
             event_name = st.text_input("Event Name", placeholder="e.g. Japan Trip 2024")
-        # For member selection, we just list usernames. 
-        # In a real app, you might want to search users or add by email.
-        # Here we list all registered users for simplicity.
-        all_usernames = [u['username'] for u in data['users']]
-        members = st.multiselect("Select Members", all_usernames, default=[st.session_state.current_user])
+            # For member selection, we just list usernames. 
+            # In a real app, you might want to search users or add by email.
+            # Here we list all registered users for simplicity.
+            all_usernames = [u['username'] for u in data['users']]
+            members = st.multiselect("Select Members", all_usernames, default=[st.session_state.current_user])
             
             if st.form_submit_button("Create Event"):
                 if event_name and members:
