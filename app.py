@@ -360,8 +360,6 @@ else:
         with st.form("add_expense"):
             title = st.text_input("Description")
             amount = st.number_input("Amount", min_value=0.01)
-            title = st.text_input("Description")
-            amount = st.number_input("Amount", min_value=0.01)
             payer = st.selectbox("Paid By", current_event['members'], index=current_event['members'].index(st.session_state.current_user) if st.session_state.current_user in current_event['members'] else 0)
             category = st.selectbox("Category", ["Food", "Transport", "Accommodation", "Entertainment", "Utilities", "Other"])
             involved = st.multiselect("Split Among", current_event['members'], default=current_event['members'])
