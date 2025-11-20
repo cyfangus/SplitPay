@@ -7,6 +7,7 @@ import os
 from datetime import datetime
 import random
 import string
+import hashlib
 
 # --- Configuration & Styling ---
 # --- Configuration & Styling ---
@@ -58,7 +59,7 @@ DATA_FILE = "data.json"
 def load_data():
     if not os.path.exists(DATA_FILE):
         default_data = {
-            "users": ["Admin"],
+            "users": [],
             "events": []
         }
         save_data(default_data)
@@ -122,6 +123,9 @@ def calculate_debts(expenses, members):
         
     return transactions
 
+def hash_password(password):
+    return hashlib.sha256(password.encode()).hexdigest()
+
 # --- Session State Initialization ---
 if 'data' not in st.session_state:
     st.session_state.data = load_data()
@@ -135,27 +139,49 @@ data = st.session_state.data
 # --- Login Screen ---
 if not st.session_state.current_user:
     st.title("👋 Welcome to SplitSync")
-    st.markdown("Please select your profile to continue.")
+    st.markdown("Please login to continue.")
     
     col1, col2 = st.columns([1, 2])
     with col1:
-        user = st.selectbox("Select User", data.get('users', []))
+        username_input = st.text_input("Username")
+        password_input = st.text_input("Password", type="password")
+        
         if st.button("Login", type="primary"):
-            st.session_state.current_user = user
-            st.rerun()
+            user_found = False
+            for user in data.get('users', []):
+                if user['username'] == username_input and user['password'] == hash_password(password_input):
+                    st.session_state.current_user = user['username']
+                    user_found = True
+                    st.rerun()
+                    break
+            
+            if not user_found:
+                st.error("Invalid username or password.")
             
     st.divider()
     with st.expander("New User? Register here"):
-        new_username = st.text_input("Enter Name")
-        if st.button("Register"):
-            if new_username and new_username not in data['users']:
-                data['users'].append(new_username)
-                save_data(data)
-                st.session_state.data = data
-                st.success(f"User {new_username} registered!")
-                st.rerun()
-            elif new_username in data['users']:
-                st.warning("User already exists.")
+        with st.form("register_form"):
+            new_username = st.text_input("Choose Username")
+            new_password = st.text_input("Choose Password", type="password")
+            confirm_password = st.text_input("Confirm Password", type="password")
+            
+            if st.form_submit_button("Register"):
+                if new_username and new_password:
+                    if new_password != confirm_password:
+                        st.error("Passwords do not match.")
+                    elif any(u['username'] == new_username for u in data['users']):
+                        st.warning("Username already exists.")
+                    else:
+                        new_user = {
+                            "username": new_username,
+                            "password": hash_password(new_password)
+                        }
+                        data['users'].append(new_user)
+                        save_data(data)
+                        st.session_state.data = data
+                        st.success(f"User {new_username} registered! Please login.")
+                else:
+                    st.error("Please fill all fields.")
 
 # --- Event Selection Screen ---
 elif not st.session_state.current_event:
@@ -192,7 +218,11 @@ elif not st.session_state.current_event:
         st.markdown("### Create New Event")
         with st.form("new_event"):
             event_name = st.text_input("Event Name", placeholder="e.g. Japan Trip 2024")
-            members = st.multiselect("Select Members", data['users'], default=[st.session_state.current_user])
+        # For member selection, we just list usernames. 
+        # In a real app, you might want to search users or add by email.
+        # Here we list all registered users for simplicity.
+        all_usernames = [u['username'] for u in data['users']]
+        members = st.multiselect("Select Members", all_usernames, default=[st.session_state.current_user])
             
             if st.form_submit_button("Create Event"):
                 if event_name and members:
@@ -330,6 +360,8 @@ else:
         with st.form("add_expense"):
             title = st.text_input("Description")
             amount = st.number_input("Amount", min_value=0.01)
+            title = st.text_input("Description")
+            amount = st.number_input("Amount", min_value=0.01)
             payer = st.selectbox("Paid By", current_event['members'], index=current_event['members'].index(st.session_state.current_user) if st.session_state.current_user in current_event['members'] else 0)
             category = st.selectbox("Category", ["Food", "Transport", "Accommodation", "Entertainment", "Utilities", "Other"])
             involved = st.multiselect("Split Among", current_event['members'], default=current_event['members'])
@@ -390,7 +422,7 @@ else:
         st.title("Manage Event")
         
         st.subheader("Add Member to Event")
-        all_users = data['users']
+        all_users = [u['username'] for u in data['users']]
         current_members = current_event['members']
         available_users = [u for u in all_users if u not in current_members]
         

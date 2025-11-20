@@ -1,9 +1,4 @@
 {
-    "members": [
-        "Angus",
-        "TWY",
-        "gummo",
-        "Kathy"
-    ],
-    "expenses": []
+    "users": [],
+    "events": []
 }
