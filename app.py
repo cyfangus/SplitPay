@@ -383,14 +383,12 @@ elif not st.session_state.current_event:
         st.markdown("### Create New Event")
         with st.form("new_event"):
             event_name = st.text_input("Event Name", placeholder="e.g. Japan Trip 2024")
-            # For member selection, we just list usernames. 
-            # In a real app, you might want to search users or add by email.
-            # Here we list all registered users for simplicity.
-            all_usernames = [u['username'] for u in data['users']]
-            members = st.multiselect("Select Members", all_usernames, default=[st.session_state.current_user])
+            # Only add creator initially to protect user privacy
+            # Other members can be added by code or manually by name
+            members = [st.session_state.current_user]
             
             if st.form_submit_button("Create Event"):
-                if event_name and members:
+                if event_name:
                     # Generate unique access code
                     access_code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
                     
@@ -585,20 +583,21 @@ else:
         st.title("Manage Event")
         
         st.subheader("Add Member to Event")
-        all_users = [u['username'] for u in data['users']]
-        current_members = current_event['members']
-        available_users = [u for u in all_users if u not in current_members]
-        
-        if available_users:
-            new_member = st.selectbox("Select User to Add", available_users)
-            if st.button("Add Member"):
-                current_event['members'].append(new_member)
-                save_data(data)
-                st.session_state.data = data
-                st.success(f"Added {new_member}!")
-                st.rerun()
-        else:
-            st.info("All registered users are already in this event.")
+        with st.form("add_member_form"):
+            new_member_username = st.text_input("Enter Username to Add")
+            if st.form_submit_button("Add Member"):
+                # Check if user exists
+                user_exists = any(u['username'] == new_member_username for u in data['users'])
+                if not user_exists:
+                    st.error("User not found.")
+                elif new_member_username in current_event['members']:
+                    st.warning("User already in event.")
+                else:
+                    current_event['members'].append(new_member_username)
+                    save_data(data)
+                    st.session_state.data = data
+                    st.success(f"Added {new_member_username}!")
+                    st.rerun()
             
         st.divider()
         st.subheader("Event Members")
