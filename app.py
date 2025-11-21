@@ -176,6 +176,28 @@ def load_data():
                 except:
                     evt['members'] = []
             
+            # Parse 'roles' back from string to dict
+            if isinstance(evt.get('roles'), str):
+                try:
+                    evt['roles'] = json.loads(evt['roles'])
+                except:
+                    evt['roles'] = {}
+            elif 'roles' not in evt:
+                evt['roles'] = {}
+            
+            # Parse 'settlements' back from string to list
+            if isinstance(evt.get('settlements'), str):
+                try:
+                    evt['settlements'] = json.loads(evt['settlements'])
+                except:
+                    evt['settlements'] = []
+            elif 'settlements' not in evt:
+                evt['settlements'] = []
+            
+            # Ensure currency field exists
+            if 'currency' not in evt:
+                evt['currency'] = 'USD'
+            
             evt['expenses'] = expenses_by_event.get(evt['id'], [])
             data['events'].append(evt)
 
@@ -218,6 +240,8 @@ def save_data(data):
             # Clone event to avoid modifying state
             evt_row = evt.copy()
             evt_row['members'] = json.dumps(evt_row['members']) # Serialize list
+            evt_row['roles'] = json.dumps(evt_row.get('roles', {})) # Serialize roles dict
+            evt_row['settlements'] = json.dumps(evt_row.get('settlements', [])) # Serialize settlements list
             del evt_row['expenses'] # Don't store nested expenses in event row
             events_rows.append(evt_row)
             
@@ -249,7 +273,7 @@ def save_data(data):
         if events_rows:
             ws.update(range_name='A1', values=[list(events_rows[0].keys())] + [list(r.values()) for r in events_rows])
         else:
-            ws.update(range_name='A1', values=[["id", "name", "members", "access_code"]])
+            ws.update(range_name='A1', values=[["id", "name", "members", "roles", "currency", "access_code", "settlements"]])
 
         # Update Expenses Sheet
         try:
