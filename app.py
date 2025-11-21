@@ -13,6 +13,7 @@ from google.oauth2.service_account import Credentials
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+import requests
 
 # --- Configuration & Styling ---
 st.set_page_config(
@@ -499,6 +500,39 @@ elif not st.session_state.current_event:
         st.markdown("### Create New Event")
         with st.form("new_event"):
             event_name = st.text_input("Event Name", placeholder="e.g. Japan Trip 2024")
+            
+            # Currency selection
+            currencies = {
+                "USD": "$ (US Dollar)",
+                "EUR": "€ (Euro)",
+                "GBP": "£ (British Pound)",
+                "JPY": "¥ (Japanese Yen)",
+                "CNY": "¥ (Chinese Yuan)",
+                "AUD": "A$ (Australian Dollar)",
+                "CAD": "C$ (Canadian Dollar)",
+                "CHF": "Fr (Swiss Franc)",
+                "HKD": "HK$ (Hong Kong Dollar)",
+                "SGD": "S$ (Singapore Dollar)",
+                "KRW": "₩ (South Korean Won)",
+                "INR": "₹ (Indian Rupee)",
+                "MXN": "Mex$ (Mexican Peso)",
+                "BRL": "R$ (Brazilian Real)",
+                "ZAR": "R (South African Rand)",
+                "NZD": "NZ$ (New Zealand Dollar)",
+                "THB": "฿ (Thai Baht)",
+                "MYR": "RM (Malaysian Ringgit)",
+                "PHP": "₱ (Philippine Peso)",
+                "IDR": "Rp (Indonesian Rupiah)",
+                "VND": "₫ (Vietnamese Dong)"
+            }
+            
+            selected_currency = st.selectbox(
+                "Currency",
+                options=list(currencies.keys()),
+                format_func=lambda x: currencies[x],
+                index=0
+            )
+            
             # Only add creator initially to protect user privacy
             # Other members can be added by code or manually by name
             members = [st.session_state.current_user]
@@ -513,6 +547,7 @@ elif not st.session_state.current_event:
                         "name": event_name,
                         "members": members,
                         "roles": {st.session_state.current_user: "admin"},  # Creator is admin
+                        "currency": selected_currency,
                         "expenses": [],
                         "access_code": access_code
                     }
@@ -575,6 +610,41 @@ else:
         roles = current_event.get('roles', {})
         return roles.get(st.session_state.current_user) == 'admin'
     
+    # Currency symbols mapping
+    CURRENCY_SYMBOLS = {
+        "USD": "$", "EUR": "€", "GBP": "£", "JPY": "¥", "CNY": "¥",
+        "AUD": "A$", "CAD": "C$", "CHF": "Fr", "HKD": "HK$", "SGD": "S$",
+        "KRW": "₩", "INR": "₹", "MXN": "Mex$", "BRL": "R$", "ZAR": "R",
+        "NZD": "NZ$", "THB": "฿", "MYR": "RM", "PHP": "₱", "IDR": "Rp", "VND": "₫"
+    }
+    
+    # Helper function to format currency
+    def format_currency(amount, currency_override=None):
+        currency_code = currency_override or current_event.get('currency', 'USD')
+        symbol = CURRENCY_SYMBOLS.get(currency_code, '$')
+        return f"{symbol}{amount:.2f}"
+    
+    # Helper function to get exchange rate
+    @st.cache_data(ttl=3600)  # Cache for 1 hour
+    def get_exchange_rate(from_currency, to_currency):
+        if from_currency == to_currency:
+            return 1.0
+        
+        try:
+            # Using exchangerate-api.com (free tier: 1500 requests/month)
+            url = f"https://api.exchangerate-api.com/v4/latest/{from_currency}"
+            response = requests.get(url, timeout=5)
+            data = response.json()
+            
+            if 'rates' in data and to_currency in data['rates']:
+                return data['rates'][to_currency]
+            else:
+                st.warning(f"Could not fetch exchange rate for {from_currency} to {to_currency}")
+                return None
+        except Exception as e:
+            st.error(f"Error fetching exchange rate: {e}")
+            return None
+    
     # Sidebar
     with st.sidebar:
         st.title("💸 SplitSync")
@@ -588,6 +658,11 @@ else:
         # Display Access Code
         code = current_event.get('access_code', 'N/A')
         st.info(f"🔑 Code: **{code}**")
+        
+        # Display Currency
+        currency_code = current_event.get('currency', 'USD')
+        currency_symbol = CURRENCY_SYMBOLS.get(currency_code, '$')
+        st.caption(f"💱 Currency: {currency_symbol} {currency_code}")
         
         if st.button("⬅️ Back to Events"):
             st.session_state.current_event = None
@@ -622,13 +697,13 @@ else:
             
             col1, col2 = st.columns(2)
             total_unsettled = unsettled_df['amount'].sum() if not unsettled_df.empty else 0
-            col1.metric("Total Unsettled", f"${total_unsettled:,.2f}")
+            col1.metric("Total Unsettled", format_currency(total_unsettled))
             col2.metric("Pending Settlements", len(debts))
             
             if debts:
                 st.subheader("⚠️ Who Owes Who")
                 for debt in debts:
-                    st.info(f"**{debt['debtor']}** owes **{debt['creditor']}**: ${debt['amount']:.2f}")
+                    st.info(f"**{debt['debtor']}** owes **{debt['creditor']}**: {format_currency(debt['amount'])}")
             else:
                 st.success("✅ All settled up!")
                 
@@ -729,7 +804,7 @@ else:
             expense_options = []
             for exp in current_event['expenses']:
                 status = "✓ Settled" if exp.get('settled', False) else "⏳ Pending"
-                expense_options.append(f"{exp['date']} - {exp['title']} (${exp['amount']:.2f}) - {status}")
+                expense_options.append(f"{exp['date']} - {exp['title']} ({format_currency(exp['amount'])}) - {status}")
             
             selected_idx = st.selectbox(
                 "Choose expense:",
@@ -814,39 +889,238 @@ else:
 
     # --- Settle Expenses ---
     elif menu == "Settle Expenses":
-        st.title("Settle Expenses")
-        unsettled = [e for e in current_event['expenses'] if not e.get('settled', False)]
+        st.title("Record Payment")
         
-        if not unsettled:
-            st.success("Nothing to settle.")
+        # Initialize settlements list if not exists
+        if 'settlements' not in current_event:
+            current_event['settlements'] = []
+        
+        # Calculate current debts
+        debts = calculate_debts(current_event['expenses'], current_event['members'])
+        
+        # Apply existing settlements to reduce debts
+        for settlement in current_event.get('settlements', []):
+            # Find and reduce the corresponding debt
+            for debt in debts:
+                if (debt['debtor'] == settlement['from_user'] and 
+                    debt['creditor'] == settlement['to_user']):
+                    debt['amount'] -= settlement['amount']
+                    if debt['amount'] <= 0:
+                        debts.remove(debt)
+                    break
+        
+        # Remove zero or negative debts
+        debts = [d for d in debts if d['amount'] > 0.01]
+        
+        # Display current outstanding debts
+        st.subheader("💰 Outstanding Balances")
+        
+        if not debts:
+            st.success("✅ All settled up! No outstanding payments.")
         else:
-            unsettled_df = pd.DataFrame(unsettled)
-            if 'involved' in unsettled_df.columns:
-                unsettled_df['involved_display'] = unsettled_df['involved'].apply(lambda x: ", ".join(x) if isinstance(x, list) else "All")
+            st.info("The following payments are pending:")
+            for debt in debts:
+                st.write(f"• **{debt['debtor']}** owes **{debt['creditor']}**: {format_currency(debt['amount'])}")
+        
+        st.divider()
+        
+        # Payment recording form
+        st.subheader("💸 Record a Payment")
+        st.caption("Use this to record when you've paid someone back.")
+        
+        # Find debts where current user is the debtor
+        my_debts = [d for d in debts if d['debtor'] == st.session_state.current_user]
+        
+        # Initialize session state for payment success
+        if 'payment_recorded' not in st.session_state:
+            st.session_state.payment_recorded = False
+        
+        if st.session_state.payment_recorded:
+            st.success("✅ Payment recorded successfully!")
+            st.session_state.payment_recorded = False
+        
+        with st.form("record_payment"):
+            # Default to first debt if user owes money
+            if my_debts:
+                default_recipient_idx = current_event['members'].index(my_debts[0]['creditor'])
+                default_amount = my_debts[0]['amount']
+            else:
+                default_recipient_idx = 0
+                default_amount = 0.0
             
-            with st.form("settle"):
-                edited = st.data_editor(
-                    unsettled_df,
-                    column_config={"settled": st.column_config.CheckboxColumn("Mark Settled", default=False)},
-                    disabled=["id", "title", "amount", "payer", "involved_display"],
-                    hide_index=True
+            # Select recipient
+            other_members = [m for m in current_event['members'] if m != st.session_state.current_user]
+            
+            if not other_members:
+                st.warning("No other members in this event to pay.")
+                st.form_submit_button("Record Payment", disabled=True)
+            else:
+                recipient = st.selectbox(
+                    "I paid:",
+                    other_members,
+                    index=min(default_recipient_idx, len(other_members) - 1) if my_debts else 0
                 )
                 
-                if st.form_submit_button("Settle Selected"):
-                    settled_ids = edited[edited['settled'] == True]['id'].tolist()
-                    for exp in current_event['expenses']:
-                        if exp['id'] in settled_ids:
-                            exp['settled'] = True
-                    save_data(data)
-                    st.session_state.data = data
-                    st.success("Settled!")
-                    st.rerun()
+                # Show suggested amount if user owes this person
+                suggested_debt = next((d for d in my_debts if d['creditor'] == recipient), None)
+                
+                if suggested_debt:
+                    st.info(f"💡 You owe {recipient}: {format_currency(suggested_debt['amount'])}")
+                    amount = st.number_input(
+                        "Amount paid:",
+                        min_value=0.01,
+                        value=float(suggested_debt['amount']),
+                        step=0.01
+                    )
+                else:
+                    amount = st.number_input(
+                        "Amount paid:",
+                        min_value=0.01,
+                        value=0.01,
+                        step=0.01
+                    )
+                
+                # Currency conversion option
+                st.divider()
+                st.caption("💱 Currency Conversion (Optional)")
+                
+                event_currency = current_event.get('currency', 'USD')
+                
+                currencies = {
+                    "USD": "$ (US Dollar)", "EUR": "€ (Euro)", "GBP": "£ (British Pound)",
+                    "JPY": "¥ (Japanese Yen)", "CNY": "¥ (Chinese Yuan)", "AUD": "A$ (Australian Dollar)",
+                    "CAD": "C$ (Canadian Dollar)", "CHF": "Fr (Swiss Franc)", "HKD": "HK$ (Hong Kong Dollar)",
+                    "SGD": "S$ (Singapore Dollar)", "KRW": "₩ (South Korean Won)", "INR": "₹ (Indian Rupee)",
+                    "MXN": "Mex$ (Mexican Peso)", "BRL": "R$ (Brazilian Real)", "ZAR": "R (South African Rand)",
+                    "NZD": "NZ$ (New Zealand Dollar)", "THB": "฿ (Thai Baht)", "MYR": "RM (Malaysian Ringgit)",
+                    "PHP": "₱ (Philippine Peso)", "IDR": "Rp (Indonesian Rupiah)", "VND": "₫ (Vietnamese Dong)"
+                }
+                
+                use_different_currency = st.checkbox(
+                    f"I paid in a different currency (Event uses {currencies.get(event_currency, event_currency)})"
+                )
+                
+                payment_currency = event_currency
+                converted_amount = amount
+                exchange_rate = 1.0
+                
+                if use_different_currency:
+                    payment_currency = st.selectbox(
+                        "Payment Currency:",
+                        options=list(currencies.keys()),
+                        format_func=lambda x: currencies[x],
+                        index=0
+                    )
+                    
+                    if payment_currency != event_currency:
+                        # Fetch exchange rate
+                        exchange_rate = get_exchange_rate(payment_currency, event_currency)
+                        
+                        if exchange_rate:
+                            converted_amount = amount * exchange_rate
+                            st.success(
+                                f"✓ Exchange Rate: 1 {payment_currency} = {exchange_rate:.4f} {event_currency}\n\n"
+                                f"{format_currency(amount, payment_currency)} = {format_currency(converted_amount, event_currency)}"
+                            )
+                        else:
+                            st.error("Could not fetch exchange rate. Please try again or use event currency.")
+                            use_different_currency = False
+                
+                st.divider()
+                
+                payment_date = st.date_input("Payment Date", datetime.today())
+                notes = st.text_input("Notes (optional)", placeholder="e.g., Cash payment")
+                
+                submitted = st.form_submit_button("💾 Record Payment", type="primary")
+                
+                if submitted:
+                    with st.spinner("Recording payment..."):
+                        # Create settlement record
+                        new_settlement = {
+                            "id": len(current_event.get('settlements', [])) + 1,
+                            "from_user": st.session_state.current_user,
+                            "to_user": recipient,
+                            "amount": converted_amount,  # Store converted amount in event currency
+                            "original_amount": amount if use_different_currency else None,
+                            "original_currency": payment_currency if use_different_currency else None,
+                            "exchange_rate": exchange_rate if use_different_currency else None,
+                            "date": str(payment_date),
+                            "notes": notes
+                        }
+                        
+                        current_event['settlements'].append(new_settlement)
+                        save_data(data)
+                        st.session_state.data = data
+                        st.session_state.payment_recorded = True
+                        st.rerun()
+        
+        # Display payment history
+        if current_event.get('settlements'):
+            st.divider()
+            st.subheader("📜 Payment History")
+            
+            settlements_df = pd.DataFrame(current_event['settlements'])
+            settlements_df = settlements_df.sort_values('date', ascending=False)
+            
+            # Format for display with currency conversion info
+            for idx, settlement in enumerate(current_event['settlements'][::-1]):  # Reverse to match sorted order
+                with st.expander(
+                    f"{settlement['date']} - {settlement['from_user']} → {settlement['to_user']}: {format_currency(settlement['amount'])}"
+                ):
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.write(f"**From:** {settlement['from_user']}")
+                        st.write(f"**To:** {settlement['to_user']}")
+                        st.write(f"**Date:** {settlement['date']}")
+                    with col2:
+                        st.write(f"**Amount:** {format_currency(settlement['amount'])}")
+                        
+                        # Show conversion info if available
+                        if settlement.get('original_currency') and settlement.get('original_amount'):
+                            st.write(f"**Original:** {format_currency(settlement['original_amount'], settlement['original_currency'])}")
+                            st.write(f"**Rate:** 1 {settlement['original_currency']} = {settlement.get('exchange_rate', 0):.4f} {current_event.get('currency', 'USD')}")
+                        
+                        if settlement.get('notes'):
+                            st.write(f"**Notes:** {settlement['notes']}")
+
 
     # --- Manage Event ---
     elif menu == "Manage Event":
         st.title("Manage Event")
         
-        st.subheader("Add Member to Event")
+        # Display all members with their roles
+        st.subheader("👥 Event Members")
+        
+        # Ensure roles dict exists
+        if 'roles' not in current_event:
+            current_event['roles'] = {}
+        
+        # Display members in a nice format
+        for member in current_event['members']:
+            role = current_event['roles'].get(member, 'member')
+            role_emoji = "👑" if role == "admin" else "👤"
+            
+            col1, col2, col3 = st.columns([3, 2, 2])
+            with col1:
+                st.text(f"{role_emoji} {member}")
+            with col2:
+                st.caption(f"Role: {role.title()}")
+            with col3:
+                # Only admins can remove members or change roles
+                if is_admin() and member != st.session_state.current_user:
+                    if st.button(f"Remove", key=f"remove_{member}"):
+                        current_event['members'].remove(member)
+                        if member in current_event['roles']:
+                            del current_event['roles'][member]
+                        save_data(data)
+                        st.session_state.data = data
+                        st.success(f"Removed {member}")
+                        st.rerun()
+        
+        st.divider()
+        
+        # Add Member Section
+        st.subheader("➕ Add Member to Event")
         with st.form("add_member_form"):
             new_member_username = st.text_input("Enter Username to Add")
             if st.form_submit_button("Add Member"):
@@ -858,12 +1132,73 @@ else:
                     st.warning("User already in event.")
                 else:
                     current_event['members'].append(new_member_username)
+                    # Assign default member role
+                    current_event['roles'][new_member_username] = "member"
                     save_data(data)
                     st.session_state.data = data
                     st.success(f"Added {new_member_username}!")
                     st.rerun()
+        
+        # Role Management Section (Admin Only)
+        if is_admin():
+            st.divider()
+            st.subheader("👑 Manage Roles (Admin Only)")
             
-        st.divider()
-        st.subheader("Event Members")
-        for m in current_event['members']:
-            st.text(f"- {m}")
+            with st.form("role_management_form"):
+                # Get non-admin members
+                eligible_members = [m for m in current_event['members'] 
+                                  if m != st.session_state.current_user]
+                
+                if eligible_members:
+                    selected_member = st.selectbox("Select Member", eligible_members)
+                    current_role = current_event['roles'].get(selected_member, 'member')
+                    new_role = st.radio("Assign Role", ["member", "admin"], 
+                                       index=0 if current_role == "member" else 1)
+                    
+                    if st.form_submit_button("Update Role"):
+                        current_event['roles'][selected_member] = new_role
+                        save_data(data)
+                        st.session_state.data = data
+                        st.success(f"Updated {selected_member}'s role to {new_role}!")
+                        st.rerun()
+                else:
+                    st.info("No other members to manage.")
+            
+            # Currency Management Section (Admin Only)
+            st.divider()
+            st.subheader("💱 Change Event Currency (Admin Only)")
+            
+            currencies = {
+                "USD": "$ (US Dollar)", "EUR": "€ (Euro)", "GBP": "£ (British Pound)",
+                "JPY": "¥ (Japanese Yen)", "CNY": "¥ (Chinese Yuan)", "AUD": "A$ (Australian Dollar)",
+                "CAD": "C$ (Canadian Dollar)", "CHF": "Fr (Swiss Franc)", "HKD": "HK$ (Hong Kong Dollar)",
+                "SGD": "S$ (Singapore Dollar)", "KRW": "₩ (South Korean Won)", "INR": "₹ (Indian Rupee)",
+                "MXN": "Mex$ (Mexican Peso)", "BRL": "R$ (Brazilian Real)", "ZAR": "R (South African Rand)",
+                "NZD": "NZ$ (New Zealand Dollar)", "THB": "฿ (Thai Baht)", "MYR": "RM (Malaysian Ringgit)",
+                "PHP": "₱ (Philippine Peso)", "IDR": "Rp (Indonesian Rupiah)", "VND": "₫ (Vietnamese Dong)"
+            }
+            
+            current_currency = current_event.get('currency', 'USD')
+            current_idx = list(currencies.keys()).index(current_currency) if current_currency in currencies else 0
+            
+            with st.form("currency_change_form"):
+                new_currency = st.selectbox(
+                    "Select New Currency",
+                    options=list(currencies.keys()),
+                    format_func=lambda x: currencies[x],
+                    index=current_idx
+                )
+                
+                st.caption(f"Current currency: {currencies.get(current_currency, current_currency)}")
+                
+                if st.form_submit_button("Update Currency"):
+                    if new_currency != current_currency:
+                        current_event['currency'] = new_currency
+                        save_data(data)
+                        st.session_state.data = data
+                        st.success(f"Currency updated to {currencies[new_currency]}!")
+                        st.rerun()
+                    else:
+                        st.info("Currency is already set to this value.")
+
+
