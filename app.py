@@ -1163,6 +1163,7 @@ else:
                         st.rerun()
                 else:
                     st.info("No other members to manage.")
+                    st.form_submit_button("Update Role", disabled=True)
             
             # Currency Management Section (Admin Only)
             st.divider()
