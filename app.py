@@ -545,8 +545,12 @@ elif not st.session_state.current_event:
     if 'show_settings' not in st.session_state:
         st.session_state.show_settings = False
     
+    if st.sidebar.button("🏠 My Events"):
+        st.session_state.show_settings = False
+        st.rerun()
+
     if st.sidebar.button("⚙️ Account Settings"):
-        st.session_state.show_settings = not st.session_state.show_settings
+        st.session_state.show_settings = True
         st.rerun()
         
     if st.sidebar.button("Logout"):
