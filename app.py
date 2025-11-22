@@ -663,11 +663,53 @@ elif not st.session_state.current_event:
         with col_bank:
             st.markdown("**My Bank Information**")
             st.caption("Shared only with approved users.")
-            current_bank = user.get('bank_details', '')
-            new_bank = st.text_area("Account Details", value=current_bank, height=100, placeholder="Bank Name: ...\nAccount Number: ...")
             
+            # Parse existing data
+            current_data = {}
+            try:
+                current_data = json.loads(user.get('bank_details', '{}'))
+            except:
+                pass
+            
+            countries = ["GB", "US", "EU", "AU", "CN", "JP", "Other"]
+            country_names = {
+                "GB": "🇬🇧 United Kingdom", "US": "🇺🇸 United States", "EU": "🇪🇺 Europe (IBAN)",
+                "AU": "🇦🇺 Australia", "CN": "🇨🇳 China", "JP": "🇯🇵 Japan", "Other": "🌍 Other"
+            }
+            
+            saved_country = current_data.get('country', 'Other')
+            try:
+                default_idx = countries.index(saved_country)
+            except:
+                default_idx = 6
+                
+            selected_country = st.selectbox("Bank Country", countries, format_func=lambda x: country_names[x], index=default_idx)
+            
+            form_data = {}
+            if selected_country == "GB":
+                form_data['sort_code'] = st.text_input("Sort Code", value=current_data.get('fields', {}).get('sort_code', ''))
+                form_data['account_number'] = st.text_input("Account Number", value=current_data.get('fields', {}).get('account_number', ''))
+                form_data['bank_name'] = st.text_input("Bank Name", value=current_data.get('fields', {}).get('bank_name', ''))
+            elif selected_country == "US":
+                form_data['routing_number'] = st.text_input("Routing Number", value=current_data.get('fields', {}).get('routing_number', ''))
+                form_data['account_number'] = st.text_input("Account Number", value=current_data.get('fields', {}).get('account_number', ''))
+                form_data['bank_name'] = st.text_input("Bank Name", value=current_data.get('fields', {}).get('bank_name', ''))
+            elif selected_country == "EU":
+                form_data['iban'] = st.text_input("IBAN", value=current_data.get('fields', {}).get('iban', ''))
+                form_data['bic'] = st.text_input("BIC/SWIFT", value=current_data.get('fields', {}).get('bic', ''))
+            elif selected_country == "AU":
+                form_data['bsb'] = st.text_input("BSB", value=current_data.get('fields', {}).get('bsb', ''))
+                form_data['account_number'] = st.text_input("Account Number", value=current_data.get('fields', {}).get('account_number', ''))
+            else:
+                legacy_val = user.get('bank_details', '') if not current_data else current_data.get('fields', {}).get('details', '')
+                form_data['details'] = st.text_area("Details", value=legacy_val, height=100)
+
             if st.button("Save Bank Details"):
-                user['bank_details'] = new_bank
+                save_struct = {
+                    "country": selected_country,
+                    "fields": form_data
+                }
+                user['bank_details'] = json.dumps(save_struct)
                 save_data(data)
                 st.success("Saved!")
                 
@@ -1587,9 +1629,17 @@ else:
                         requests_list = user_data.get('access_requests', []) if user_data else []
                         
                         if st.session_state.current_user in approved_list:
-                            details = user_data.get('bank_details', 'No details provided.') if user_data else 'No details.'
-                            st.success("✅ Access Granted")
-                            st.code(details)
+                            raw_details = user_data.get('bank_details', '')
+                            try:
+                                details_json = json.loads(raw_details)
+                                st.success("✅ Access Granted")
+                                st.caption(f"Region: {details_json.get('country')}")
+                                for k, v in details_json.get('fields', {}).items():
+                                    if v:
+                                        st.text(f"{k.replace('_', ' ').title()}: {v}")
+                            except:
+                                st.success("✅ Access Granted")
+                                st.code(raw_details or "No details provided.")
                         elif st.session_state.current_user in requests_list:
                             st.warning("⏳ Request Pending Approval")
                         else:
