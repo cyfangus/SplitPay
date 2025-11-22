@@ -1167,10 +1167,16 @@ else:
         
         # Payment recording form
         st.subheader("💸 Record a Payment")
-        st.caption("Use this to record when you've paid someone back.")
         
-        # Find debts where current user is the debtor
-        my_debts = [d for d in debts if d['debtor'] == st.session_state.current_user]
+        payer = st.session_state.current_user
+        if is_admin():
+            st.caption("👑 Admin Mode: You can record payments for any member.")
+            payer = st.selectbox("From (Payer):", current_event['members'], index=current_event['members'].index(payer))
+        else:
+            st.caption("Use this to record when you've paid someone back.")
+        
+        # Find debts where selected payer is the debtor
+        payer_debts = [d for d in debts if d['debtor'] == payer]
         
         # Initialize session state for payment success
         if 'payment_recorded' not in st.session_state:
@@ -1181,45 +1187,51 @@ else:
             st.session_state.payment_recorded = False
         
         with st.form("record_payment"):
-            # Default to first debt if user owes money
-            if my_debts:
-                default_recipient_idx = current_event['members'].index(my_debts[0]['creditor'])
-                default_amount = my_debts[0]['amount']
-            else:
-                default_recipient_idx = 0
-                default_amount = 0.0
+            # Select recipient (exclude payer)
+            possible_recipients = [m for m in current_event['members'] if m != payer]
             
-            # Select recipient
-            other_members = [m for m in current_event['members'] if m != st.session_state.current_user]
-            
-            if not other_members:
+            if not possible_recipients:
                 st.warning("No other members in this event to pay.")
                 st.form_submit_button("Record Payment", disabled=True)
             else:
+                # Determine default recipient and amount based on debts
+                default_index = 0
+                default_amount = 0.01
+                suggested_debt = None
+                
+                if payer_debts:
+                    try:
+                        default_recipient_name = payer_debts[0]['creditor']
+                        default_index = possible_recipients.index(default_recipient_name)
+                        suggested_debt = payer_debts[0]
+                        default_amount = suggested_debt['amount']
+                    except ValueError:
+                        default_index = 0
+                
                 recipient = st.selectbox(
-                    "I paid:",
-                    other_members,
-                    index=min(default_recipient_idx, len(other_members) - 1) if my_debts else 0
+                    "To (Recipient):",
+                    possible_recipients,
+                    index=default_index
                 )
                 
                 # Show suggested amount if user owes this person
-                suggested_debt = next((d for d in my_debts if d['creditor'] == recipient), None)
+                # Re-check debt for the *selected* recipient (in case user changed selection, 
+                # but wait, inside form we can't react to selection change. 
+                # So we only show suggestion for the *default* or *initially selected* one?
+                # Actually, we can't show dynamic suggestions inside the form based on form selection.
+                # We can only show "You owe [Someone]: [Amount]" if we move recipient selection outside.
+                # But let's keep it simple for now. We'll just show the suggestion for the *default* selection if applicable,
+                # or maybe just list all debts above the form (which we already do).
                 
-                if suggested_debt:
-                    st.info(f"💡 You owe {recipient}: {format_currency(suggested_debt['amount'])}")
-                    amount = st.number_input(
-                        "Amount paid:",
-                        min_value=0.01,
-                        value=float(suggested_debt['amount']),
-                        step=0.01
-                    )
-                else:
-                    amount = st.number_input(
-                        "Amount paid:",
-                        min_value=0.01,
-                        value=0.01,
-                        step=0.01
-                    )
+                if suggested_debt and recipient == suggested_debt['creditor']:
+                     st.info(f"💡 {payer} owes {recipient}: {format_currency(suggested_debt['amount'])}")
+                
+                amount = st.number_input(
+                    "Amount paid:",
+                    min_value=0.01,
+                    value=float(default_amount),
+                    step=0.01
+                )
                 
                 # Currency conversion option
                 st.divider()
@@ -1279,7 +1291,7 @@ else:
                         # Create settlement record
                         new_settlement = {
                             "id": len(current_event.get('settlements', [])) + 1,
-                            "from_user": st.session_state.current_user,
+                            "from_user": payer,
                             "to_user": recipient,
                             "amount": converted_amount,  # Store converted amount in event currency
                             "original_amount": amount if use_different_currency else None,
