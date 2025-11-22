@@ -221,6 +221,33 @@ def save_local_data(data):
     with open(DATA_FILE, "w") as f:
         json.dump(data, f, indent=4)
 
+def update_username_references(data, old_username, new_username):
+    """Updates username references across all events, expenses, and settlements."""
+    for event in data['events']:
+        # Update members list
+        if old_username in event['members']:
+            event['members'] = [new_username if m == old_username else m for m in event['members']]
+        
+        # Update roles
+        if old_username in event.get('roles', {}):
+            event['roles'][new_username] = event['roles'].pop(old_username)
+            
+        # Update expenses
+        for exp in event['expenses']:
+            if exp['payer'] == old_username:
+                exp['payer'] = new_username
+            if 'involved' in exp:
+                if isinstance(exp['involved'], list):
+                    exp['involved'] = [new_username if m == old_username else m for m in exp['involved']]
+        
+        # Update settlements
+        for sett in event.get('settlements', []):
+            if sett['from_user'] == old_username:
+                sett['from_user'] = new_username
+            if sett['to_user'] == old_username:
+                sett['to_user'] = new_username
+    return data
+
 def save_data(data):
     client = get_gsheet_client()
     
@@ -499,11 +526,80 @@ if not st.session_state.current_user:
 # --- Event Selection Screen ---
 elif not st.session_state.current_event:
     st.sidebar.title(f"👤 {st.session_state.current_user}")
-    if st.sidebar.button("Logout"):
-        st.session_state.current_user = None
+    
+    # Initialize settings state
+    if 'show_settings' not in st.session_state:
+        st.session_state.show_settings = False
+    
+    if st.sidebar.button("⚙️ Account Settings"):
+        st.session_state.show_settings = not st.session_state.show_settings
         st.rerun()
         
-    st.title("Your Events")
+    if st.sidebar.button("Logout"):
+        st.session_state.current_user = None
+        st.session_state.show_settings = False
+        st.rerun()
+    
+    if st.session_state.show_settings:
+        st.title("⚙️ Account Settings")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.subheader("Change Password")
+            with st.form("change_password"):
+                current_pwd = st.text_input("Current Password", type="password")
+                new_pwd = st.text_input("New Password", type="password")
+                confirm_pwd = st.text_input("Confirm New Password", type="password")
+                
+                if st.form_submit_button("Update Password", type="primary"):
+                    user_idx = next((i for i, u in enumerate(data['users']) if u['username'] == st.session_state.current_user), -1)
+                    if user_idx != -1:
+                        user = data['users'][user_idx]
+                        if user['password'] == hash_password(current_pwd):
+                            if new_pwd == confirm_pwd:
+                                if len(new_pwd) >= 6:
+                                    data['users'][user_idx]['password'] = hash_password(new_pwd)
+                                    save_data(data)
+                                    st.success("✅ Password updated successfully!")
+                                else:
+                                    st.error("Password must be at least 6 characters.")
+                            else:
+                                st.error("New passwords do not match.")
+                        else:
+                            st.error("Incorrect current password.")
+        
+        with col2:
+            st.subheader("Change Username")
+            st.warning("⚠️ Changing your username will update it across all past events and expenses.")
+            with st.form("change_username"):
+                new_username = st.text_input("New Username")
+                
+                if st.form_submit_button("Update Username", type="primary"):
+                    if new_username and new_username != st.session_state.current_user:
+                        if any(u['username'] == new_username for u in data['users']):
+                            st.error("Username already taken.")
+                        else:
+                            user_idx = next((i for i, u in enumerate(data['users']) if u['username'] == st.session_state.current_user), -1)
+                            if user_idx != -1:
+                                old_user = st.session_state.current_user
+                                data['users'][user_idx]['username'] = new_username
+                                update_username_references(data, old_user, new_username)
+                                st.session_state.current_user = new_username
+                                save_data(data)
+                                st.success("✅ Username updated successfully!")
+                                st.rerun()
+                    elif new_username == st.session_state.current_user:
+                        st.info("New username is the same as current.")
+                    else:
+                        st.error("Please enter a valid username.")
+                        
+        if st.button("← Back to Events"):
+            st.session_state.show_settings = False
+            st.rerun()
+
+    else:
+        st.title("Your Events")
     
     # Filter events where current user is a member
     my_events = [e for e in data.get('events', []) if st.session_state.current_user in e['members']]
