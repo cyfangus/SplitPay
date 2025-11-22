@@ -717,26 +717,63 @@ elif not st.session_state.current_event:
                 form_data['details'] = st.text_area("Details", value=legacy_val, height=100)
 
             if st.button("Save Bank Details"):
-                # Auto-format specific fields
+                errors = []
+                
+                # Validation Logic
                 if selected_country == "GB":
-                    # Sort Code: XX-XX-XX
                     sc = form_data.get('sort_code', '').replace('-', '').replace(' ', '')
-                    if len(sc) == 6 and sc.isdigit():
-                        form_data['sort_code'] = f"{sc[:2]}-{sc[2:4]}-{sc[4:]}"
+                    ac = form_data.get('account_number', '').replace(' ', '')
+                    
+                    if not sc.isdigit() or len(sc) != 6:
+                        errors.append("Sort Code must be exactly 6 digits.")
+                    if not ac.isdigit() or len(ac) != 8:
+                        errors.append("Account Number must be exactly 8 digits.")
+                        
+                elif selected_country == "US":
+                    rn = form_data.get('routing_number', '').replace(' ', '')
+                    ac = form_data.get('account_number', '').replace(' ', '')
+                    
+                    if not rn.isdigit() or len(rn) != 9:
+                        errors.append("Routing Number must be exactly 9 digits.")
+                    if not ac.isdigit() or len(ac) < 4:
+                        errors.append("Account Number seems too short.")
+
+                elif selected_country == "EU":
+                    iban = form_data.get('iban', '').replace(' ', '').upper()
+                    if len(iban) < 15 or not iban.isalnum():
+                        errors.append("Invalid IBAN format.")
                 
                 elif selected_country == "AU":
-                    # BSB: XXX-XXX
                     bsb = form_data.get('bsb', '').replace('-', '').replace(' ', '')
-                    if len(bsb) == 6 and bsb.isdigit():
+                    ac = form_data.get('account_number', '').replace(' ', '')
+                    
+                    if not bsb.isdigit() or len(bsb) != 6:
+                        errors.append("BSB must be exactly 6 digits.")
+                    if not ac.isdigit() or len(ac) < 5:
+                        errors.append("Account Number seems too short.")
+
+                if errors:
+                    for err in errors:
+                        st.error(f"❌ {err}")
+                else:
+                    # Auto-format specific fields
+                    if selected_country == "GB":
+                        # Sort Code: XX-XX-XX
+                        sc = form_data.get('sort_code', '').replace('-', '').replace(' ', '')
+                        form_data['sort_code'] = f"{sc[:2]}-{sc[2:4]}-{sc[4:]}"
+                    
+                    elif selected_country == "AU":
+                        # BSB: XXX-XXX
+                        bsb = form_data.get('bsb', '').replace('-', '').replace(' ', '')
                         form_data['bsb'] = f"{bsb[:3]}-{bsb[3:]}"
 
-                save_struct = {
-                    "country": selected_country,
-                    "fields": form_data
-                }
-                user['bank_details'] = json.dumps(save_struct)
-                save_data(data)
-                st.success("Saved!")
+                    save_struct = {
+                        "country": selected_country,
+                        "fields": form_data
+                    }
+                    user['bank_details'] = json.dumps(save_struct)
+                    save_data(data)
+                    st.success("Saved!")
                 
         with col_requests:
             st.markdown("**Access Requests**")
