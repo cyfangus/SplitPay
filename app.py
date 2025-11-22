@@ -669,6 +669,16 @@ else:
         currency_code = currency_override or current_event.get('currency', 'USD')
         symbol = CURRENCY_SYMBOLS.get(currency_code, '$')
         return f"{symbol}{amount:.2f}"
+
+    # Helper function to format expense display (showing original currency if applicable)
+    def format_expense_display(expense):
+        base_amount = format_currency(expense['amount'])
+        if expense.get('original_currency') and expense.get('original_amount'):
+            event_curr = current_event.get('currency', 'USD')
+            if expense['original_currency'] != event_curr:
+                 orig_amount = format_currency(expense['original_amount'], expense['original_currency'])
+                 return f"{base_amount} ({orig_amount})"
+        return base_amount
     
     # Helper function to get exchange rate
     @st.cache_data(ttl=3600)  # Cache for 1 hour
@@ -772,8 +782,19 @@ else:
             if 'involved' in display_df.columns:
                 display_df['involved'] = display_df['involved'].apply(lambda x: ", ".join(x) if isinstance(x, list) else "All")
             
+            # Add formatted amount column
+            display_df['display_amount'] = display_df.apply(format_expense_display, axis=1)
+            
             st.dataframe(
-                display_df.sort_values(by='date', ascending=False)[['date', 'title', 'amount', 'payer', 'involved', 'settled']],
+                display_df.sort_values(by='date', ascending=False)[['date', 'title', 'display_amount', 'payer', 'involved', 'settled']],
+                column_config={
+                    "display_amount": st.column_config.TextColumn("Amount"),
+                    "date": "Date",
+                    "title": "Description",
+                    "payer": "Paid By",
+                    "involved": "Split Among",
+                    "settled": "Status"
+                },
                 use_container_width=True,
                 hide_index=True
             )
@@ -791,31 +812,58 @@ else:
             st.success("✅ Expense saved successfully!")
             st.session_state.expense_saved = False
         
+        # 1. Currency Selection (Outside Form for interactivity)
+        event_currency = current_event.get('currency', 'USD')
+        currencies = {
+            "USD": "$ (US Dollar)", "EUR": "€ (Euro)", "GBP": "£ (British Pound)",
+            "JPY": "¥ (Japanese Yen)", "CNY": "¥ (Chinese Yuan)", "AUD": "A$ (Australian Dollar)",
+            "CAD": "C$ (Canadian Dollar)", "CHF": "Fr (Swiss Franc)", "HKD": "HK$ (Hong Kong Dollar)",
+            "SGD": "S$ (Singapore Dollar)", "KRW": "₩ (South Korean Won)", "INR": "₹ (Indian Rupee)",
+            "MXN": "Mex$ (Mexican Peso)", "BRL": "R$ (Brazilian Real)", "ZAR": "R (South African Rand)",
+            "NZD": "NZ$ (New Zealand Dollar)", "THB": "฿ (Thai Baht)", "MYR": "RM (Malaysian Ringgit)",
+            "PHP": "₱ (Philippine Peso)", "IDR": "Rp (Indonesian Rupiah)", "VND": "₫ (Vietnamese Dong)"
+        }
+        
+        col_curr, col_mode = st.columns([1, 2])
+        with col_curr:
+            selected_currency = st.selectbox(
+                "Currency",
+                options=list(currencies.keys()),
+                index=list(currencies.keys()).index(event_currency) if event_currency in currencies else 0,
+                format_func=lambda x: x,
+                key="add_exp_curr"
+            )
+            
+        conversion_mode = "Auto"
+        if selected_currency != event_currency:
+            with col_mode:
+                conversion_mode = st.radio(
+                    "Conversion Method", 
+                    ["Auto (Market Rate)", "Manual (Set Base Amount)"], 
+                    horizontal=True,
+                    help="Auto: We fetch the rate. Manual: You specify the exact amount in event currency.",
+                    key="add_exp_mode"
+                )
+        
         with st.form("add_expense", clear_on_submit=True):
             title = st.text_input("Description")
             
-            # Currency Selection
-            event_currency = current_event.get('currency', 'USD')
-            currencies = {
-                "USD": "$ (US Dollar)", "EUR": "€ (Euro)", "GBP": "£ (British Pound)",
-                "JPY": "¥ (Japanese Yen)", "CNY": "¥ (Chinese Yuan)", "AUD": "A$ (Australian Dollar)",
-                "CAD": "C$ (Canadian Dollar)", "CHF": "Fr (Swiss Franc)", "HKD": "HK$ (Hong Kong Dollar)",
-                "SGD": "S$ (Singapore Dollar)", "KRW": "₩ (South Korean Won)", "INR": "₹ (Indian Rupee)",
-                "MXN": "Mex$ (Mexican Peso)", "BRL": "R$ (Brazilian Real)", "ZAR": "R (South African Rand)",
-                "NZD": "NZ$ (New Zealand Dollar)", "THB": "฿ (Thai Baht)", "MYR": "RM (Malaysian Ringgit)",
-                "PHP": "₱ (Philippine Peso)", "IDR": "Rp (Indonesian Rupiah)", "VND": "₫ (Vietnamese Dong)"
-            }
+            # Dynamic Inputs
+            amount_in_base = 0.0
+            amount_in_original = 0.0
             
-            col_curr, col_amt = st.columns([1, 2])
-            with col_curr:
-                selected_currency = st.selectbox(
-                    "Currency",
-                    options=list(currencies.keys()),
-                    index=list(currencies.keys()).index(event_currency) if event_currency in currencies else 0,
-                    format_func=lambda x: x
-                )
-            with col_amt:
-                amount = st.number_input("Amount", min_value=0.01)
+            if selected_currency == event_currency:
+                amount_in_base = st.number_input(f"Amount ({event_currency})", min_value=0.01)
+            else:
+                if conversion_mode == "Auto (Market Rate)":
+                    amount_in_original = st.number_input(f"Amount ({selected_currency})", min_value=0.01)
+                    st.caption(f"Will be converted to {event_currency} on submit.")
+                else:
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        amount_in_original = st.number_input(f"Spent ({selected_currency})", min_value=0.01)
+                    with c2:
+                        amount_in_base = st.number_input(f"Equivalent ({event_currency})", min_value=0.01)
                 
             payer = st.selectbox("Paid By", current_event['members'], index=current_event['members'].index(st.session_state.current_user) if st.session_state.current_user in current_event['members'] else 0)
             category = st.selectbox("Category", ["Food", "Transport", "Accommodation", "Entertainment", "Utilities", "Other"])
@@ -827,28 +875,39 @@ else:
             if submitted:
                 if title and involved:
                     with st.spinner("Saving expense..."):
-                        # Handle conversion
-                        final_amount = amount
-                        exchange_rate = 1.0
-                        original_currency = None
-                        original_amount = None
+                        # Logic to determine final amounts
+                        final_amount = 0.0
+                        original_amt = None
+                        original_curr = None
+                        exch_rate = None
                         
-                        if selected_currency != event_currency:
-                            exchange_rate = get_exchange_rate(selected_currency, event_currency)
-                            if exchange_rate:
-                                final_amount = amount * exchange_rate
-                                original_currency = selected_currency
-                                original_amount = amount
+                        if selected_currency == event_currency:
+                            final_amount = amount_in_base
+                        else:
+                            original_curr = selected_currency
+                            original_amt = amount_in_original
+                            
+                            if conversion_mode == "Auto (Market Rate)":
+                                rate = get_exchange_rate(selected_currency, event_currency)
+                                if rate:
+                                    final_amount = amount_in_original * rate
+                                    exch_rate = rate
+                                else:
+                                    st.error("Could not fetch rate. Using 1:1.")
+                                    final_amount = amount_in_original
+                                    exch_rate = 1.0
                             else:
-                                st.error("Could not fetch exchange rate. Using 1:1 rate.")
+                                final_amount = amount_in_base
+                                if amount_in_original > 0:
+                                    exch_rate = final_amount / amount_in_original
                         
                         new_expense = {
                             "id": len(current_event['expenses']) + 1,
                             "title": title,
                             "amount": final_amount,
-                            "original_amount": original_amount,
-                            "original_currency": original_currency,
-                            "exchange_rate": exchange_rate,
+                            "original_amount": original_amt,
+                            "original_currency": original_curr,
+                            "exchange_rate": exch_rate,
                             "payer": payer,
                             "involved": involved,
                             "date": str(date),
@@ -891,7 +950,8 @@ else:
             expense_options = []
             for exp in current_event['expenses']:
                 status = "✓ Settled" if exp.get('settled', False) else "⏳ Pending"
-                expense_options.append(f"{exp['date']} - {exp['title']} ({format_currency(exp['amount'])}) - {status}")
+                display_amt = format_expense_display(exp)
+                expense_options.append(f"{exp['date']} - {exp['title']} ({display_amt}) - {status}")
             
             selected_idx = st.selectbox(
                 "Choose expense:",
@@ -905,35 +965,73 @@ else:
                 st.divider()
                 st.subheader("Edit Details:")
                 
+                # 1. Currency Selection (Outside Form)
+                event_currency = current_event.get('currency', 'USD')
+                currencies = {
+                    "USD": "$ (US Dollar)", "EUR": "€ (Euro)", "GBP": "£ (British Pound)",
+                    "JPY": "¥ (Japanese Yen)", "CNY": "¥ (Chinese Yuan)", "AUD": "A$ (Australian Dollar)",
+                    "CAD": "C$ (Canadian Dollar)", "CHF": "Fr (Swiss Franc)", "HKD": "HK$ (Hong Kong Dollar)",
+                    "SGD": "S$ (Singapore Dollar)", "KRW": "₩ (South Korean Won)", "INR": "₹ (Indian Rupee)",
+                    "MXN": "Mex$ (Mexican Peso)", "BRL": "R$ (Brazilian Real)", "ZAR": "R (South African Rand)",
+                    "NZD": "NZ$ (New Zealand Dollar)", "THB": "฿ (Thai Baht)", "MYR": "RM (Malaysian Ringgit)",
+                    "PHP": "₱ (Philippine Peso)", "IDR": "Rp (Indonesian Rupiah)", "VND": "₫ (Vietnamese Dong)"
+                }
+                
+                # Determine initial values for outside widgets
+                initial_currency = selected_expense.get('original_currency', event_currency)
+                initial_amount_orig = selected_expense.get('original_amount', selected_expense['amount'])
+                initial_amount_base = selected_expense['amount']
+                
+                # Use session state to initialize widgets only once per selection
+                if 'edit_curr' not in st.session_state or st.session_state.get('last_edit_id') != selected_expense['id']:
+                    st.session_state.edit_curr = initial_currency
+                    st.session_state.last_edit_id = selected_expense['id']
+                    # Default mode: Manual if we have original amount, else Auto
+                    st.session_state.edit_mode = "Manual (Set Base Amount)" if selected_expense.get('original_amount') else "Auto (Market Rate)"
+
+                col_curr, col_mode = st.columns([1, 2])
+                with col_curr:
+                    new_currency = st.selectbox(
+                        "Currency",
+                        options=list(currencies.keys()),
+                        index=list(currencies.keys()).index(initial_currency) if initial_currency in currencies else 0,
+                        format_func=lambda x: x,
+                        key="edit_exp_curr"
+                    )
+                
+                conversion_mode = "Auto"
+                if new_currency != event_currency:
+                    with col_mode:
+                        conversion_mode = st.radio(
+                            "Conversion Method", 
+                            ["Auto (Market Rate)", "Manual (Set Base Amount)"], 
+                            horizontal=True,
+                            key="edit_exp_mode"
+                        )
+
                 with st.form("edit_expense_form"):
                     new_title = st.text_input("Description", value=selected_expense['title'])
                     
-                    # Currency Selection
-                    event_currency = current_event.get('currency', 'USD')
-                    currencies = {
-                        "USD": "$ (US Dollar)", "EUR": "€ (Euro)", "GBP": "£ (British Pound)",
-                        "JPY": "¥ (Japanese Yen)", "CNY": "¥ (Chinese Yuan)", "AUD": "A$ (Australian Dollar)",
-                        "CAD": "C$ (Canadian Dollar)", "CHF": "Fr (Swiss Franc)", "HKD": "HK$ (Hong Kong Dollar)",
-                        "SGD": "S$ (Singapore Dollar)", "KRW": "₩ (South Korean Won)", "INR": "₹ (Indian Rupee)",
-                        "MXN": "Mex$ (Mexican Peso)", "BRL": "R$ (Brazilian Real)", "ZAR": "R (South African Rand)",
-                        "NZD": "NZ$ (New Zealand Dollar)", "THB": "฿ (Thai Baht)", "MYR": "RM (Malaysian Ringgit)",
-                        "PHP": "₱ (Philippine Peso)", "IDR": "Rp (Indonesian Rupiah)", "VND": "₫ (Vietnamese Dong)"
-                    }
+                    # Dynamic Inputs
+                    new_amount_base = 0.0
+                    new_amount_orig = 0.0
                     
-                    # Determine initial values
-                    initial_currency = selected_expense.get('original_currency', event_currency)
-                    initial_amount = selected_expense.get('original_amount', selected_expense['amount'])
-                    
-                    col_curr, col_amt = st.columns([1, 2])
-                    with col_curr:
-                        new_currency = st.selectbox(
-                            "Currency",
-                            options=list(currencies.keys()),
-                            index=list(currencies.keys()).index(initial_currency) if initial_currency in currencies else 0,
-                            format_func=lambda x: x
-                        )
-                    with col_amt:
-                        new_amount = st.number_input("Amount", min_value=0.01, value=float(initial_amount))
+                    if new_currency == event_currency:
+                        new_amount_base = st.number_input(f"Amount ({event_currency})", min_value=0.01, value=float(initial_amount_base))
+                    else:
+                        if conversion_mode == "Auto (Market Rate)":
+                            # If switching to Auto, try to use original amount if available, else base
+                            val = float(initial_amount_orig) if initial_currency == new_currency else 1.0
+                            new_amount_orig = st.number_input(f"Amount ({new_currency})", min_value=0.01, value=val)
+                            st.caption(f"Will be converted to {event_currency} on submit.")
+                        else:
+                            c1, c2 = st.columns(2)
+                            with c1:
+                                val_orig = float(initial_amount_orig) if initial_currency == new_currency else 1.0
+                                new_amount_orig = st.number_input(f"Spent ({new_currency})", min_value=0.01, value=val_orig)
+                            with c2:
+                                val_base = float(initial_amount_base)
+                                new_amount_base = st.number_input(f"Equivalent ({event_currency})", min_value=0.01, value=val_base)
                     
                     # Get current payer index
                     try:
@@ -969,26 +1067,37 @@ else:
                     if submitted:
                         if new_title and new_involved: # Added this check back for form validation
                             with st.spinner("Updating expense..."):
-                                # Handle conversion
-                                final_amount = new_amount
-                                exchange_rate = 1.0
-                                original_currency = None
-                                original_amount = None
+                                # Logic to determine final amounts
+                                final_amount = 0.0
+                                original_amt = None
+                                original_curr = None
+                                exch_rate = None
                                 
-                                if new_currency != event_currency:
-                                    exchange_rate = get_exchange_rate(new_currency, event_currency)
-                                    if exchange_rate:
-                                        final_amount = new_amount * exchange_rate
-                                        original_currency = new_currency
-                                        original_amount = new_amount
+                                if new_currency == event_currency:
+                                    final_amount = new_amount_base
+                                else:
+                                    original_curr = new_currency
+                                    original_amt = new_amount_orig
+                                    
+                                    if conversion_mode == "Auto (Market Rate)":
+                                        rate = get_exchange_rate(new_currency, event_currency)
+                                        if rate:
+                                            final_amount = new_amount_orig * rate
+                                            exch_rate = rate
+                                        else:
+                                            st.error("Could not fetch rate. Using 1:1.")
+                                            final_amount = new_amount_orig
+                                            exch_rate = 1.0
                                     else:
-                                        st.error("Could not fetch exchange rate. Using 1:1 rate.")
+                                        final_amount = new_amount_base
+                                        if new_amount_orig > 0:
+                                            exch_rate = final_amount / new_amount_orig
                                 
                                 selected_expense['title'] = new_title
                                 selected_expense['amount'] = final_amount
-                                selected_expense['original_amount'] = original_amount
-                                selected_expense['original_currency'] = original_currency
-                                selected_expense['exchange_rate'] = exchange_rate
+                                selected_expense['original_amount'] = original_amt
+                                selected_expense['original_currency'] = original_curr
+                                selected_expense['exchange_rate'] = exch_rate
                                 selected_expense['payer'] = new_payer
                                 selected_expense['category'] = new_category
                                 selected_expense['involved'] = new_involved
