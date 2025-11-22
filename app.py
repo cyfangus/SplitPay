@@ -686,19 +686,31 @@ elif not st.session_state.current_event:
             selected_country = st.selectbox("Bank Country", countries, format_func=lambda x: country_names[x], index=default_idx)
             
             form_data = {}
+            # Universal field
+            form_data['account_holder_name'] = st.text_input("Account Holder Name", value=current_data.get('fields', {}).get('account_holder_name', ''))
+            
             if selected_country == "GB":
-                form_data['sort_code'] = st.text_input("Sort Code", value=current_data.get('fields', {}).get('sort_code', ''))
-                form_data['account_number'] = st.text_input("Account Number", value=current_data.get('fields', {}).get('account_number', ''))
-                form_data['bank_name'] = st.text_input("Bank Name", value=current_data.get('fields', {}).get('bank_name', ''))
+                form_data['sort_code'] = st.text_input("Sort Code (6 digits)", value=current_data.get('fields', {}).get('sort_code', ''), placeholder="XX-XX-XX")
+                form_data['account_number'] = st.text_input("Account Number (8 digits)", value=current_data.get('fields', {}).get('account_number', ''))
             elif selected_country == "US":
-                form_data['routing_number'] = st.text_input("Routing Number", value=current_data.get('fields', {}).get('routing_number', ''))
+                form_data['routing_number'] = st.text_input("Routing Number (ABA)", value=current_data.get('fields', {}).get('routing_number', ''))
                 form_data['account_number'] = st.text_input("Account Number", value=current_data.get('fields', {}).get('account_number', ''))
-                form_data['bank_name'] = st.text_input("Bank Name", value=current_data.get('fields', {}).get('bank_name', ''))
+                form_data['account_type'] = st.selectbox("Account Type", ["Checking", "Savings"], index=0 if current_data.get('fields', {}).get('account_type') == "Checking" else 1)
             elif selected_country == "EU":
                 form_data['iban'] = st.text_input("IBAN", value=current_data.get('fields', {}).get('iban', ''))
-                form_data['bic'] = st.text_input("BIC/SWIFT", value=current_data.get('fields', {}).get('bic', ''))
+                form_data['bic'] = st.text_input("BIC / SWIFT (Optional)", value=current_data.get('fields', {}).get('bic', ''))
             elif selected_country == "AU":
-                form_data['bsb'] = st.text_input("BSB", value=current_data.get('fields', {}).get('bsb', ''))
+                form_data['bsb'] = st.text_input("BSB (6 digits)", value=current_data.get('fields', {}).get('bsb', ''), placeholder="XXX-XXX")
+                form_data['account_number'] = st.text_input("Account Number", value=current_data.get('fields', {}).get('account_number', ''))
+                form_data['payid'] = st.text_input("PayID (Optional)", value=current_data.get('fields', {}).get('payid', ''))
+            elif selected_country == "CN":
+                form_data['bank_name'] = st.text_input("Bank Name", value=current_data.get('fields', {}).get('bank_name', ''))
+                form_data['card_number'] = st.text_input("Card / Account Number", value=current_data.get('fields', {}).get('card_number', ''))
+                form_data['branch_name'] = st.text_input("Branch Name (Sub-branch)", value=current_data.get('fields', {}).get('branch_name', ''))
+            elif selected_country == "JP":
+                form_data['bank_name'] = st.text_input("Bank Name", value=current_data.get('fields', {}).get('bank_name', ''))
+                form_data['branch_name'] = st.text_input("Branch Name / Code", value=current_data.get('fields', {}).get('branch_name', ''))
+                form_data['account_type'] = st.selectbox("Account Type", ["Ordinary (Futsu)", "Current (Toza)", "Savings (Chochiku)"], index=0)
                 form_data['account_number'] = st.text_input("Account Number", value=current_data.get('fields', {}).get('account_number', ''))
             else:
                 legacy_val = user.get('bank_details', '') if not current_data else current_data.get('fields', {}).get('details', '')
