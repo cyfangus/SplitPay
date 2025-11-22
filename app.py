@@ -164,6 +164,13 @@ def load_data():
                 except:
                     exp['involved'] = []
             
+            # Ensure 'settled' is boolean
+            settled_val = exp.get('settled', False)
+            if isinstance(settled_val, str):
+                exp['settled'] = settled_val.upper() == 'TRUE'
+            else:
+                exp['settled'] = bool(settled_val)
+            
             # Remove event_id from expense object to match internal schema
             del exp['event_id']
             expenses_by_event[eid].append(exp)
