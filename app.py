@@ -793,21 +793,62 @@ else:
         
         with st.form("add_expense", clear_on_submit=True):
             title = st.text_input("Description")
-            amount = st.number_input("Amount", min_value=0.01)
+            
+            # Currency Selection
+            event_currency = current_event.get('currency', 'USD')
+            currencies = {
+                "USD": "$ (US Dollar)", "EUR": "€ (Euro)", "GBP": "£ (British Pound)",
+                "JPY": "¥ (Japanese Yen)", "CNY": "¥ (Chinese Yuan)", "AUD": "A$ (Australian Dollar)",
+                "CAD": "C$ (Canadian Dollar)", "CHF": "Fr (Swiss Franc)", "HKD": "HK$ (Hong Kong Dollar)",
+                "SGD": "S$ (Singapore Dollar)", "KRW": "₩ (South Korean Won)", "INR": "₹ (Indian Rupee)",
+                "MXN": "Mex$ (Mexican Peso)", "BRL": "R$ (Brazilian Real)", "ZAR": "R (South African Rand)",
+                "NZD": "NZ$ (New Zealand Dollar)", "THB": "฿ (Thai Baht)", "MYR": "RM (Malaysian Ringgit)",
+                "PHP": "₱ (Philippine Peso)", "IDR": "Rp (Indonesian Rupiah)", "VND": "₫ (Vietnamese Dong)"
+            }
+            
+            col_curr, col_amt = st.columns([1, 2])
+            with col_curr:
+                selected_currency = st.selectbox(
+                    "Currency",
+                    options=list(currencies.keys()),
+                    index=list(currencies.keys()).index(event_currency) if event_currency in currencies else 0,
+                    format_func=lambda x: x
+                )
+            with col_amt:
+                amount = st.number_input("Amount", min_value=0.01)
+                
             payer = st.selectbox("Paid By", current_event['members'], index=current_event['members'].index(st.session_state.current_user) if st.session_state.current_user in current_event['members'] else 0)
             category = st.selectbox("Category", ["Food", "Transport", "Accommodation", "Entertainment", "Utilities", "Other"])
             involved = st.multiselect("Split Among", current_event['members'], default=current_event['members'])
             date = st.date_input("Date", datetime.today())
             
-            submitted = st.form_submit_button("Save Expense")
+            submitted = st.form_submit_button("Save Expense", type="primary")
             
             if submitted:
                 if title and involved:
                     with st.spinner("Saving expense..."):
+                        # Handle conversion
+                        final_amount = amount
+                        exchange_rate = 1.0
+                        original_currency = None
+                        original_amount = None
+                        
+                        if selected_currency != event_currency:
+                            exchange_rate = get_exchange_rate(selected_currency, event_currency)
+                            if exchange_rate:
+                                final_amount = amount * exchange_rate
+                                original_currency = selected_currency
+                                original_amount = amount
+                            else:
+                                st.error("Could not fetch exchange rate. Using 1:1 rate.")
+                        
                         new_expense = {
                             "id": len(current_event['expenses']) + 1,
                             "title": title,
-                            "amount": amount,
+                            "amount": final_amount,
+                            "original_amount": original_amount,
+                            "original_currency": original_currency,
+                            "exchange_rate": exchange_rate,
                             "payer": payer,
                             "involved": involved,
                             "date": str(date),
@@ -866,7 +907,33 @@ else:
                 
                 with st.form("edit_expense_form"):
                     new_title = st.text_input("Description", value=selected_expense['title'])
-                    new_amount = st.number_input("Amount", min_value=0.01, value=float(selected_expense['amount']))
+                    
+                    # Currency Selection
+                    event_currency = current_event.get('currency', 'USD')
+                    currencies = {
+                        "USD": "$ (US Dollar)", "EUR": "€ (Euro)", "GBP": "£ (British Pound)",
+                        "JPY": "¥ (Japanese Yen)", "CNY": "¥ (Chinese Yuan)", "AUD": "A$ (Australian Dollar)",
+                        "CAD": "C$ (Canadian Dollar)", "CHF": "Fr (Swiss Franc)", "HKD": "HK$ (Hong Kong Dollar)",
+                        "SGD": "S$ (Singapore Dollar)", "KRW": "₩ (South Korean Won)", "INR": "₹ (Indian Rupee)",
+                        "MXN": "Mex$ (Mexican Peso)", "BRL": "R$ (Brazilian Real)", "ZAR": "R (South African Rand)",
+                        "NZD": "NZ$ (New Zealand Dollar)", "THB": "฿ (Thai Baht)", "MYR": "RM (Malaysian Ringgit)",
+                        "PHP": "₱ (Philippine Peso)", "IDR": "Rp (Indonesian Rupiah)", "VND": "₫ (Vietnamese Dong)"
+                    }
+                    
+                    # Determine initial values
+                    initial_currency = selected_expense.get('original_currency', event_currency)
+                    initial_amount = selected_expense.get('original_amount', selected_expense['amount'])
+                    
+                    col_curr, col_amt = st.columns([1, 2])
+                    with col_curr:
+                        new_currency = st.selectbox(
+                            "Currency",
+                            options=list(currencies.keys()),
+                            index=list(currencies.keys()).index(initial_currency) if initial_currency in currencies else 0,
+                            format_func=lambda x: x
+                        )
+                    with col_amt:
+                        new_amount = st.number_input("Amount", min_value=0.01, value=float(initial_amount))
                     
                     # Get current payer index
                     try:
@@ -897,40 +964,52 @@ else:
                     
                     new_date = st.date_input("Date", value=current_date)
                     
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        update_button = st.form_submit_button("💾 Update Expense", type="primary")
-                    with col2:
-                        delete_button = st.form_submit_button("🗑️ Delete Expense", type="secondary")
+                    submitted = st.form_submit_button("Update Expense", type="primary")
                     
-                    if update_button:
-                        if new_title and new_involved:
+                    if submitted:
+                        if new_title and new_involved: # Added this check back for form validation
                             with st.spinner("Updating expense..."):
-                                # Update the expense
-                                current_event['expenses'][selected_idx] = {
-                                    "id": selected_expense['id'],
-                                    "title": new_title,
-                                    "amount": new_amount,
-                                    "payer": new_payer,
-                                    "involved": new_involved,
-                                    "date": str(new_date),
-                                    "category": new_category,
-                                    "settled": selected_expense.get('settled', False)
-                                }
+                                # Handle conversion
+                                final_amount = new_amount
+                                exchange_rate = 1.0
+                                original_currency = None
+                                original_amount = None
+                                
+                                if new_currency != event_currency:
+                                    exchange_rate = get_exchange_rate(new_currency, event_currency)
+                                    if exchange_rate:
+                                        final_amount = new_amount * exchange_rate
+                                        original_currency = new_currency
+                                        original_amount = new_amount
+                                    else:
+                                        st.error("Could not fetch exchange rate. Using 1:1 rate.")
+                                
+                                selected_expense['title'] = new_title
+                                selected_expense['amount'] = final_amount
+                                selected_expense['original_amount'] = original_amount
+                                selected_expense['original_currency'] = original_currency
+                                selected_expense['exchange_rate'] = exchange_rate
+                                selected_expense['payer'] = new_payer
+                                selected_expense['category'] = new_category
+                                selected_expense['involved'] = new_involved
+                                selected_expense['date'] = str(new_date)
+                                selected_expense['settled'] = selected_expense.get('settled', False) # Ensure settled status is preserved
+                                
                                 save_data(data)
                                 st.session_state.data = data
                                 st.session_state.expense_updated = True
                                 st.rerun()
                         else:
                             st.error("Please fill all required fields.")
-                    
-                    if delete_button:
-                        with st.spinner("Deleting expense..."):
-                            current_event['expenses'].pop(selected_idx)
-                            save_data(data)
-                            st.session_state.data = data
-                            st.success("Expense deleted successfully!")
-                            st.rerun()
+                
+                # Delete button is now outside the form
+                if st.button("🗑️ Delete Expense"):
+                    with st.spinner("Deleting expense..."):
+                        current_event['expenses'].pop(selected_idx) # Use pop with index to remove
+                        save_data(data)
+                        st.session_state.data = data
+                        st.success("Expense deleted successfully!")
+                        st.rerun()
 
 
     # --- Settle Expenses ---
