@@ -597,9 +597,10 @@ elif not st.session_state.current_event:
         if st.button("← Back to Events"):
             st.session_state.show_settings = False
             st.rerun()
+            
+        st.stop()
 
-    else:
-        st.title("Your Events")
+    st.title("Your Events")
     
     # Filter events where current user is a member
     my_events = [e for e in data.get('events', []) if st.session_state.current_user in e['members']]
